@@ -1,0 +1,102 @@
+{
+  "name": "hearai",
+  "version": "1.0.0",
+  "description": "HearAI — AI-powered desktop audio transcription",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "set NODE_ENV=development&& electron .",
+    "build": "electron-builder",
+    "build-win": "electron-builder --win",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "audio",
+    "transcription",
+    "AI",
+    "whisper",
+    "translation",
+    "electron"
+  ],
+  "author": "MadHLDM",
+  "license": "MIT",
+  "homepage": "https://github.com/MadHLDM/HearAI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MadHLDM/HearAI.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MadHLDM/HearAI/issues"
+  },
+  "build": {
+    "appId": "com.madhldm.hearai",
+    "productName": "HearAI",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "renderer_new.js",
+      "index.html",
+      "styles.css",
+      "settings.js",
+      "settings-window.html",
+      "python/**/*",
+      "ffmpeg/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "python/**/*",
+      "ffmpeg/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "AudioVideo"
+    }
+  },
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^37.3.1",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0"
+  }
+}

@@ -1,0 +1,30 @@
+* text=auto
+
+# Normalize line endings for common text files
+*.js text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Windows batch/scripts keep CRLF
+*.bat text eol=crlf
+
+# Treat these as binary
+*.ico binary
+*.icns binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webm binary
+*.wav binary
+*.mp3 binary
+*.m4a binary
+*.exe binary
+*.dll binary
+*.7z binary
+*.zip binary
+*.AppImage binary

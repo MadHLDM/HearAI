@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
+    <title>HearAI</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>HearAI</h1>
+            <p>Records desktop audio directly with FFmpeg and transcribes with AI</p>
+            <p>Press <kbd>Ctrl+F9</kbd> to start/stop recording</p>
+        </header>
+
+        <main>
+            <div class="recording-section">
+                <div class="recording-indicator" id="recordingIndicator">
+                    <div class="pulse"></div>
+                    <span id="recordingStatus">Ready to Record</span>
+                </div>
+                
+                <div class="controls">
+                    <button id="recordBtn" class="record-btn">
+                        <span>🎙️</span> Start Recording
+                    </button>
+                    <div class="help-text">
+                        <small>Records true desktop audio using FFmpeg</small>
+                    </div>
+                </div>
+            </div>
+
+
+            <div class="output-section">
+                <div class="transcription-panel">
+                    <h3>AI Transcription</h3>
+                    <div id="transcriptionOutput" class="output-text" placeholder="Transcribed text will appear here...">
+                        Transcribed text will appear here...
+                    </div>
+                    <button id="copyTranscription" class="copy-btn">📋 Copy</button>
+                </div>
+            </div>
+
+            <div class="status-section">
+                <div id="statusMessage" class="status-message">Ready</div>
+                <div id="progressBar" class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <div class="settings-panel">
+                <button id="settingsBtn" class="settings-btn">⚙️ Settings</button>
+                <div class="info">
+                    <span>Free AI-powered transcription and translation</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script src="renderer_new.js"></script>
+</body>
+</html>

@@ -1,0 +1,634 @@
+﻿const { app, BrowserWindow, globalShortcut, ipcMain, desktopCapturer, dialog } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { spawn } = require('child_process');
+const os = require('os');
+const Settings = require('./settings');
+
+const settings = new Settings();
+let mainWindow;
+let settingsWindow;
+let isRecording = false;
+let ffmpegProcess = null;
+let currentRecordingFile = null;
+
+function createWindow() {
+  const windowSettings = settings.getUISettings();
+  
+  mainWindow = new BrowserWindow({
+    width: windowSettings.size.width,
+    height: windowSettings.size.height,
+    x: windowSettings.position.x,
+    y: windowSettings.position.y,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      enableRemoteModule: false,
+      webSecurity: false, // Required for desktop capture
+      allowRunningInsecureContent: true, // Required for desktop capture
+      preload: path.join(__dirname, 'preload.js')
+    },
+    icon: path.join(__dirname, 'assets/icon.ico')
+  });
+
+  mainWindow.loadFile('index.html');
+  
+  // Handle permissions for desktop capture
+  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+    console.log('Permission requested:', permission);
+    if (permission === 'media' || permission === 'microphone' || permission === 'camera') {
+      callback(true); // Allow media permissions
+    } else {
+      callback(false);
+    }
+  });
+  
+  mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    console.log('Permission check:', permission, details);
+    if (permission === 'media' || permission === 'microphone' || permission === 'camera') {
+      return true; // Allow media permissions
+    }
+    return false;
+  });
+  
+  // Open DevTools in development
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.webContents.openDevTools();
+  }
+  
+  // Save window position and size on close
+  mainWindow.on('close', () => {
+    const [width, height] = mainWindow.getSize();
+    const [x, y] = mainWindow.getPosition();
+    
+    settings.setUISettings({
+      size: { width, height },
+      position: { x, y }
+    });
+  });
+}
+
+function createSettingsWindow() {
+  if (settingsWindow) {
+    settingsWindow.focus();
+    return;
+  }
+  
+  settingsWindow = new BrowserWindow({
+    width: 700,
+    height: 600,
+    parent: mainWindow,
+    modal: true,
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+  
+  settingsWindow.loadFile('settings-window.html');
+  
+  settingsWindow.once('ready-to-show', () => {
+    settingsWindow.show();
+  });
+  
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
+  });
+}
+
+app.whenReady().then(() => {
+  createWindow();
+
+  // Set up modern display media request handler for desktop audio capture
+  mainWindow.webContents.session.setDisplayMediaRequestHandler((request, callback) => {
+    console.log('Display media request received');
+    
+    // Use desktopCapturer to get available sources
+    desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
+      console.log('Available sources for display media:', sources.length);
+      
+      // Find the primary screen source
+      const screenSource = sources.find(source => source.id.startsWith('screen:'));
+      
+      if (screenSource) {
+        console.log('Granting display media access for:', screenSource.name);
+        
+        // Grant access with system audio loopback
+        callback({
+          video: screenSource,
+          audio: 'loopback', // System audio loopback on Windows
+          enableLocalEcho: false
+        });
+      } else {
+        console.log('No screen source found, denying request');
+        callback({});
+      }
+    }).catch((error) => {
+      console.error('Error getting desktop sources:', error);
+      callback({});
+    });
+  });
+
+  // Register global shortcut Ctrl+O with error handling
+  try {
+    globalShortcut.unregisterAll(); // Clear any existing shortcuts
+    const ret = globalShortcut.register('CommandOrControl+F9', () => {
+      console.log('Ctrl+Alt+R pressed');
+      if (mainWindow) {
+        if (!isRecording) {
+          startRecording();
+        } else {
+          stopRecording();
+        }
+      }
+    });
+
+    if (ret) {
+      console.log('Global shortcut Ctrl+Alt+R registered successfully');
+    } else {
+      console.log('Global shortcut registration failed - Ctrl+Alt+R may be in use by another app');
+    }
+  } catch (error) {
+    console.log('Global shortcut registration error:', error.message);
+  }
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+
+// IPC handlers
+ipcMain.handle('get-desktop-sources', async () => {
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen', 'window'],
+      thumbnailSize: { width: 0, height: 0 },
+      fetchWindowIcons: false
+    });
+    console.log(`Found ${sources.length} desktop sources`);
+    return sources;
+  } catch (error) {
+    console.error('Error getting desktop sources:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('start-recording', async () => {
+  console.log('Start FFmpeg recording requested');
+  
+  try {
+    if (isRecording) {
+      return { success: false, error: 'Already recording' };
+    }
+    
+    // Create temporary file for recording
+    const tempDir = os.tmpdir();
+    const timestamp = Date.now();
+    currentRecordingFile = path.join(tempDir, `desktop_audio_${timestamp}.wav`);
+    
+    console.log('Recording to:', currentRecordingFile);
+    
+    // Use available microphone with proper name format
+    const ffmpegArgs = [
+      '-f', 'dshow',
+      '-i', 'audio=Microphone (HyperX Quadcast)',  // Remove quotes around device name
+      '-ac', '1',       // Mono channel
+      '-ar', '16000',   // 16kHz sample rate (good for Whisper)
+      '-t', '30',       // 30 second max recording (safety limit)
+      '-y',             // Overwrite output file
+      currentRecordingFile
+    ];
+    
+    console.log('Starting FFmpeg with microphone input:', ffmpegArgs);
+    console.log('INFO: Recording from microphone. For desktop audio, enable Stereo Mix in Windows Sound settings.');
+    
+    // Spawn FFmpeg process
+    ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    let ffmpegReady = false;
+    
+    ffmpegProcess.stdout.on('data', (data) => {
+      console.log('FFmpeg stdout:', data.toString());
+    });
+    
+    ffmpegProcess.stderr.on('data', (data) => {
+      const output = data.toString();
+      console.log('FFmpeg stderr:', output);
+      
+      // FFmpeg sends progress info to stderr, look for recording indicators
+      if (output.includes('Stream mapping:') || output.includes('Press [q] to stop')) {
+        ffmpegReady = true;
+      }
+    });
+    
+    ffmpegProcess.on('error', (error) => {
+      console.error('FFmpeg process error:', error);
+      isRecording = false;
+      ffmpegProcess = null;
+    });
+    
+    ffmpegProcess.on('close', (code) => {
+      console.log('FFmpeg process closed with code:', code);
+      isRecording = false;
+      ffmpegProcess = null;
+    });
+    
+    // Give FFmpeg a moment to start
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    if (ffmpegProcess) {
+      isRecording = true;
+      console.log('FFmpeg recording started successfully');
+      return { success: true };
+    } else {
+      return { success: false, error: 'FFmpeg failed to start' };
+    }
+    
+  } catch (error) {
+    console.error('Error starting FFmpeg recording:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('stop-recording', async () => {
+  console.log('Stop FFmpeg recording requested');
+  
+  try {
+    if (!isRecording || !ffmpegProcess) {
+      return { success: false, error: 'Not currently recording' };
+    }
+    
+    // Stop FFmpeg gracefully by sending 'q' command
+    ffmpegProcess.stdin.write('q\n');
+    
+    // Wait for FFmpeg to finish
+    await new Promise((resolve) => {
+      ffmpegProcess.on('close', resolve);
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        if (ffmpegProcess) {
+          ffmpegProcess.kill('SIGTERM');
+        }
+        resolve();
+      }, 5000);
+    });
+    
+    isRecording = false;
+    ffmpegProcess = null;
+    
+    // Check if file was created and has content
+    if (currentRecordingFile && fs.existsSync(currentRecordingFile)) {
+      const stats = fs.statSync(currentRecordingFile);
+      console.log(`Recording file created: ${currentRecordingFile}, size: ${stats.size} bytes`);
+      
+      if (stats.size > 1000) { // At least 1KB of audio data
+        // Transcribe the recorded file
+        console.log('Transcribing recorded audio file...');
+        const transcription = await transcribeAudioFile(currentRecordingFile);
+        
+        // Clean up the temp file
+        try {
+          fs.unlinkSync(currentRecordingFile);
+          console.log('Cleaned up temp recording file');
+        } catch (cleanupError) {
+          console.warn('Failed to cleanup temp file:', cleanupError);
+        }
+        
+        currentRecordingFile = null;
+        
+        return { 
+          success: true, 
+          transcription: transcription,
+          message: 'Recording completed and transcribed'
+        };
+      } else {
+        return { success: false, error: 'Recording file is too small (no audio captured)' };
+      }
+    } else {
+      return { success: false, error: 'Recording file was not created' };
+    }
+    
+  } catch (error) {
+    console.error('Error stopping FFmpeg recording:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Function to transcribe audio file using existing Python script
+async function transcribeAudioFile(audioFilePath) {
+  console.log('Transcribing audio file:', audioFilePath);
+  
+  try {
+    const pythonScript = path.join(__dirname, 'python', 'transcribe.py');
+    
+    // Spawn Python process with file input
+    const python = spawn('python', [pythonScript, '--input', audioFilePath, '--model', 'base'], {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    return new Promise((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      
+      python.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+      
+      python.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      
+      python.on('close', (code) => {
+        console.log('Python transcription process closed with code:', code);
+        console.log('Python stderr:', stderr);
+        console.log('Python stdout:', stdout);
+        
+        // Try to parse JSON output regardless of exit code - sometimes Whisper works but returns non-zero exit code
+        try {
+          const result = JSON.parse(stdout);
+          if (result.success && result.text && result.text.trim()) {
+            console.log('Transcription successful, text length:', result.text.length);
+            resolve(result.text);
+          } else if (result.success && (!result.text || result.text.trim() === '')) {
+            reject(new Error('No speech detected in audio recording. Try speaking closer to microphone or enable Stereo Mix for desktop audio.'));
+          } else {
+            reject(new Error(result.error || 'Transcription failed - no valid text returned'));
+          }
+        } catch (parseError) {
+          console.error('Failed to parse Python output:', stdout);
+          // If we can't parse JSON, fall back to checking exit code
+          if (code === 0) {
+            reject(new Error('Failed to parse transcription result'));
+          } else {
+            reject(new Error(`Python process failed with code ${code}: ${stderr}`));
+          }
+        }
+      });
+      
+      python.on('error', (error) => {
+        console.error('Python process error:', error);
+        reject(error);
+      });
+    });
+    
+  } catch (error) {
+    console.error('Error in transcribeAudioFile:', error);
+    throw error;
+  }
+}
+
+ipcMain.handle('transcribe-audio', async (event, audioData) => {
+  console.log('Transcribe audio requested, data size:', audioData.length);
+  
+  try {
+    const { spawn } = require('child_process');
+    const pythonScript = path.join(__dirname, 'python', 'transcribe.py');
+    
+    // Spawn Python process
+    const python = spawn('python', [pythonScript, '--stdin'], {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    return new Promise((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      
+      python.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+      
+      python.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      
+      python.on('close', (code) => {
+        console.log('Python process closed with code:', code);
+        console.log('Python stderr:', stderr);
+        
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout);
+            if (result.success) {
+              resolve(result.text);
+            } else {
+              reject(new Error(result.error || 'Transcription failed'));
+            }
+          } catch (parseError) {
+            console.error('Failed to parse Python output:', stdout);
+            reject(new Error('Failed to parse transcription result'));
+          }
+        } else {
+          reject(new Error(`Python process failed with code ${code}: ${stderr}`));
+        }
+      });
+      
+      python.on('error', (error) => {
+        console.error('Python process error:', error);
+        reject(error);
+      });
+      
+      // Write audio data to Python process stdin
+      python.stdin.write(Buffer.from(audioData));
+      python.stdin.end();
+    });
+    
+  } catch (error) {
+    console.error('Error in transcribe-audio:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('translate-text', async (event, text, targetLanguage) => {
+  console.log('Translate text requested:', targetLanguage);
+  
+  if (!text || text.trim() === '') {
+    return 'No text to translate';
+  }
+  
+  try {
+    const { spawn } = require('child_process');
+    const pythonScript = path.join(__dirname, 'python', 'translate.py');
+    
+    // First try LibreTranslate, fallback to basic response if not available
+    const python = spawn('python', [
+      pythonScript, 
+      '--text', text,
+      '--target', targetLanguage,
+      '--service', 'libretranslate'
+    ], {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    return new Promise((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      
+      python.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+      
+      python.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      
+      python.on('close', (code) => {
+        console.log('Python translation process closed with code:', code);
+        console.log('Python stderr:', stderr);
+        
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout);
+            if (result.success) {
+              resolve(result.translated_text);
+            } else {
+              // Fallback message if translation service unavailable
+              resolve(`Translation to ${targetLanguage} not available. Please install LibreTranslate:\npip install libretranslate\nlibretranslate --host 127.0.0.1 --port 5000`);
+            }
+          } catch (parseError) {
+            console.error('Failed to parse Python translation output:', stdout);
+            resolve(`Translation service error. Original text: ${text}`);
+          }
+        } else {
+          resolve(`Translation failed. Original text: ${text}`);
+        }
+      });
+      
+      python.on('error', (error) => {
+        console.error('Python translation process error:', error);
+        resolve(`Translation service not available. Original text: ${text}`);
+      });
+    });
+    
+  } catch (error) {
+    console.error('Error in translate-text:', error);
+    return `Translation error. Original text: ${text}`;
+  }
+});
+
+function startRecording() {
+  console.log('Starting recording...');
+  mainWindow.webContents.send('start-recording');
+}
+
+function stopRecording() {
+  console.log('Stopping recording...');
+  mainWindow.webContents.send('stop-recording');
+}
+
+// Settings IPC handlers
+ipcMain.handle('open-settings', () => {
+  createSettingsWindow();
+});
+
+ipcMain.handle('get-settings', () => {
+  return settings.getAll();
+});
+
+ipcMain.handle('save-settings', (event, newSettings) => {
+  try {
+    // Save settings
+    Object.keys(newSettings).forEach(key => {
+      settings.set(key, newSettings[key]);
+    });
+    
+    // Re-register global shortcuts if hotkey changed
+    if (newSettings.recordingHotkey) {
+      globalShortcut.unregisterAll();
+      const ret = globalShortcut.register(newSettings.recordingHotkey, () => {
+        if (mainWindow) {
+          if (!isRecording) {
+            startRecording();
+          } else {
+            stopRecording();
+          }
+        }
+      });
+      
+      if (!ret) {
+        console.log('Failed to register new hotkey:', newSettings.recordingHotkey);
+      }
+    }
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('reset-settings', () => {
+  try {
+    settings.reset();
+    return { success: true };
+  } catch (error) {
+    console.error('Error resetting settings:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('export-settings', async () => {
+  try {
+    const result = await dialog.showSaveDialog(settingsWindow || mainWindow, {
+      title: 'Export Settings',
+      defaultPath: 'transcription-settings.json',
+      filters: [
+        { name: 'JSON Files', extensions: ['json'] }
+      ]
+    });
+    
+    if (!result.canceled) {
+      const settingsData = settings.exportSettings();
+      fs.writeFileSync(result.filePath, settingsData);
+      return { success: true };
+    }
+    
+    return { success: false, error: 'Export canceled' };
+  } catch (error) {
+    console.error('Error exporting settings:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('import-settings', async () => {
+  try {
+    const result = await dialog.showOpenDialog(settingsWindow || mainWindow, {
+      title: 'Import Settings',
+      filters: [
+        { name: 'JSON Files', extensions: ['json'] }
+      ],
+      properties: ['openFile']
+    });
+    
+    if (!result.canceled && result.filePaths.length > 0) {
+      const settingsData = fs.readFileSync(result.filePaths[0], 'utf8');
+      const success = settings.importSettings(settingsData);
+      
+      if (success) {
+        return { success: true };
+      } else {
+        throw new Error('Invalid settings file format');
+      }
+    }
+    
+    return { success: false, error: 'Import canceled' };
+  } catch (error) {
+    console.error('Error importing settings:', error);
+    throw error;
+  }
+});
