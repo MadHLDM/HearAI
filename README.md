@@ -1,8 +1,8 @@
-# 🎙️ HearAI
+# HearAI
 
 A free, open-source desktop application that captures system audio, transcribes it using AI (OpenAI Whisper), and translates the text to your desired language using LibreTranslate.
 
-## ✨ Features
+## Features
 
 - **Global Hotkey**: Press `Ctrl+O` to start/stop recording from anywhere
 - **Desktop Audio Capture**: Records system audio (what you hear) 
@@ -12,7 +12,7 @@ A free, open-source desktop application that captures system audio, transcribes 
 - **Modern UI**: Clean, intuitive interface with real-time feedback
 - **Customizable**: Extensive settings for audio quality, languages, and behavior
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -53,7 +53,7 @@ A free, open-source desktop application that captures system audio, transcribes 
    - For **LibreTranslate**: `pip install libretranslate && libretranslate --host 127.0.0.1 --port 5000`
    - For **Google Translate**: Get an API key and add it in Settings
 
-## 📖 How to Use
+## How to Use
 
 1. **Launch the application**
 2. **Press `Ctrl+F9`** anywhere on your system to start recording
@@ -63,7 +63,7 @@ A free, open-source desktop application that captures system audio, transcribes 
 6. **Copy text** using the copy buttons
 7. **Configure settings** via the ⚙️ Settings button
 
-## ⚙️ Configuration
+## Configuration
 
 ### Audio Settings
 - **AI Model Quality**: Choose from tiny, base, small, medium, large
@@ -82,7 +82,7 @@ A free, open-source desktop application that captures system audio, transcribes 
 - **Notifications**: Enable/disable system notifications
 - **Window Behavior**: Minimize to tray options
 
-## 🛠️ Development
+## Development
 
 ### Project Structure
 ```
@@ -122,7 +122,7 @@ npm run build
 
 Built applications will be in the `dist/` folder.
 
-## 🔧 Technical Details
+## Technical Details
 
 ### AI Transcription
 - **Engine**: OpenAI Whisper (open source)
@@ -142,14 +142,14 @@ Built applications will be in the `dist/` folder.
 - **Quality**: 16kHz, 16-bit for optimal Whisper performance
 - **Limitations**: Cannot capture audio from DRM-protected sources
 
-## 🔒 Privacy & Security
+## Privacy & Security
 
 - **Local Processing**: All AI transcription happens on your machine
 - **No Cloud Dependencies**: Works completely offline (except Google Translate API if used)
 - **No Data Storage**: Audio and transcriptions are not permanently stored
 - **Open Source**: Full source code available for security review
 
-## 🚨 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -179,35 +179,3 @@ Built applications will be in the `dist/` folder.
 - **Enable GPU acceleration** if you have compatible hardware
 - **Close unnecessary applications** during transcription for better performance
 - **Adjust audio sensitivity** to reduce background noise processing
-
-## 🤝 Contributing
-
-This is an open-source project! Contributions are welcome:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-Areas for contribution:
-- Additional translation services
-- UI/UX improvements
-- Performance optimizations
-- Cross-platform compatibility
-- Documentation improvements
-
-## 📜 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- **OpenAI Whisper** - Excellent open-source speech recognition
-- **LibreTranslate** - Free and open-source machine translation
-- **Electron** - Cross-platform desktop app framework
-- **Contributors** - Thanks to all contributors and testers!
-
----
-
-**Free • Open Source • Privacy-Focused • Offline-Capable**
