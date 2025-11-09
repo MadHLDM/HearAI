@@ -2,13 +2,16 @@
 """
 Whisper-based audio transcription script for the Electron app
 """
-
+import data_interpreter
 import sys
 import os
 import tempfile
 import argparse
 import json
 from pathlib import Path
+
+# --- Forçar o PATH do FFmpeg manualmente ---
+os.environ["PATH"] += os.pathsep + r"C:\Users\User\src\ffmpeg\bin"
 
 def install_requirements():
     """Check if required packages are available"""
@@ -183,7 +186,7 @@ def main():
                     os.unlink(temp_path)
                 except:
                     pass
-                    
+                
         else:
             # Process file directly
             if not os.path.exists(args.input):
@@ -198,9 +201,20 @@ def main():
         
         # Output result as JSON to stdout, ensuring it's the only thing there
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
-        
-        # Return 0 if transcription was successful, 1 only if it truly failed
+
+        # Se a transcrição deu certo, tenta analisar os dados
         if result.get('success', False):
+            from data_interpreter import answer_with_ai
+            CSV_PATH = r"C:\Users\User\Downloads\2020_OrcamentoDespesa\2020_OrcamentoDespesa.csv"
+            
+            question_text = result['text']
+            response = answer_with_ai(question_text, CSV_PATH)
+
+            # imprimir resultado do data_source (para o Electron capturar)
+            print("DATA_SOURCE_ANSWER_START")
+            print(json.dumps(response, ensure_ascii=False, indent=2))
+            print("DATA_SOURCE_ANSWER_END")
+
             return 0
         else:
             return 1
