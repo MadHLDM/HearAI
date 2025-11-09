@@ -1,49 +1,60 @@
 import pandas as pd
-import os
-import json
-import chardet
-from openai import OpenAI
+from gpt4all import GPT4All
+from pathlib import Path
 
-os.environ["OPENAI_API_KEY"] = "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"
+CSV_PATH = r"C:\Users\User\Downloads\2020_OrcamentoDespesa\2020_OrcamentoDespesa.csv"
 
-client = OpenAI()
+# --- Inicialização segura do modelo local ---
+MODEL_PATH = Path.home() / "AppData" / "Local" / "nomic.ai" / "GPT4All"
+MODEL_NAME = "Nous-Hermes-2-Mistral-7B-DPO.Q4_0.gguf"
 
-
-def answer_with_ai(question, csv_path):
-    # Detectar a codificação automaticamente
-    with open(csv_path, "rb") as f:
-        result = chardet.detect(f.read(50000))
-    encoding = result["encoding"] or "utf-8"
-
-    df = pd.read_csv(csv_path, encoding=encoding, sep=";")
+try:
+    model = GPT4All(MODEL_NAME, model_path=MODEL_PATH, allow_download=False, device="cpu")
+except Exception as e:
+    print(f"Erro ao carregar o modelo local: {e}")
+    model = None
 
 
-    # Converte parte dos dados para texto legível
-    # (evita mandar o CSV inteiro para a IA, o que seria caro)
-    amostra = df.head(50).to_dict(orient="records")
+def answer_with_ai(question):
+    print(f"DEBUG -> Pergunta recebida: {question}")
 
-    # Cria o contexto que a IA vai ler
-    contexto = (
-        "Você é uma IA especialista em finanças públicas.\n"
-        "Responda perguntas sobre o orçamento com base nestes dados.\n"
-        "Aqui está uma amostra dos registros do arquivo CSV:\n\n"
-        f"{json.dumps(amostra, ensure_ascii=False, indent=2)}\n\n"
-        "Agora, com base nesses dados, responda claramente à seguinte pergunta:\n"
-        f"Pergunta: {question}"
-    )
+    try:
+        df = pd.read_csv(
+            CSV_PATH,
+            sep=";",              # usa separador correto
+            encoding="latin-1",   # evita erro UTF-8
+            on_bad_lines="skip",  # ignora linhas corrompidas
+            engine="python"
+        )
 
-    # Envia para o modelo GPT interpretar
-    resposta = client.chat.completions.create(
-        model="gpt-4o-mini",  # pode usar outro modelo, ex: 'gpt-4-turbo'
-        messages=[
-            {"role": "system", "content": "Você é um assistente de análise de dados."},
-            {"role": "user", "content": contexto}
-        ],
-        temperature=0.2
-    )
+        print(f"DEBUG -> Linhas totais no CSV: {len(df)}")
 
-    return {
-        "success": True,
-        "answer_text": resposta.choices[0].message.content.strip(),
-        "language": "pt"
-    }
+        # Cria uma resposta básica de busca textual
+        relevant_rows = df[df.apply(lambda row: row.astype(str).str.contains(question, case=False).any(), axis=1)]
+
+        print(f"DEBUG -> Linhas relevantes encontradas: {len(relevant_rows)}")
+
+        if relevant_rows.empty:
+            context = "Nenhuma informação correspondente encontrada no CSV."
+        else:
+            context = relevant_rows.to_string(index=False)[:5000]  # limita o contexto para não travar o modelo
+
+        if model is None:
+            print("DEBUG -> Modelo não foi carregado.")
+            return {"success": False, "error": "Modelo local não foi carregado."}
+
+        prompt = (
+            f"Base de dados:\n{context}\n\n"
+            f"Pergunta: {question}\n\n"
+            "Responda de forma objetiva com base nos dados acima."
+        )
+
+        print("DEBUG -> Enviando prompt para o modelo local...")
+        response = model.generate(prompt, max_tokens=250)
+        print(f"DEBUG -> Resposta do modelo: {response[:300]}")  # mostra parte da resposta
+
+        return {"success": True, "answer": response.strip()}
+
+    except Exception as e:
+        print(f"DEBUG -> Exceção capturada: {e}")
+        return {"success": False, "error": str(e)}

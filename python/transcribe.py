@@ -207,8 +207,8 @@ def main():
             from data_interpreter import answer_with_ai
             CSV_PATH = r"C:\Users\User\Downloads\2020_OrcamentoDespesa\2020_OrcamentoDespesa.csv"
             
-            question_text = result['text']
-            response = answer_with_ai(question_text, CSV_PATH)
+            # question_text = result['text']
+            response = data_interpreter.answer_with_ai(result['text'])
 
             # imprimir resultado do data_source (para o Electron capturar)
             print("DATA_SOURCE_ANSWER_START")
